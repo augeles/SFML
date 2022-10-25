@@ -145,7 +145,8 @@ m_cursorGrabbed(false)
     {
         // If we're the first window handle, set DPI Awareness
         // plus we only need to poll for joysticks when WM_DEVICECHANGE message is received
-        if (handleCount == 0) {
+        if (handleCount == 0)
+        {
             setProcessDpiAware();
             JoystickImpl::setLazyUpdates(true);
         }
@@ -1038,15 +1039,15 @@ void WindowImplWin32::processEvent(UINT message, WPARAM wParam, LPARAM lParam)
                     for (int i = 0; i < num; ++i)
                     {
                         Event event;
-                        int index = getTouchID(events[i].dwID);
+                        int   index = getTouchID(events[i].dwID);
 
                         // Out of Ids? Should never happen
                         if (index == -1)
                             continue;
 
                         event.touch.finger = static_cast<unsigned int>(index);
-                        point.x = TOUCH_COORD_TO_PIXEL(events[i].x);
-                        point.y = TOUCH_COORD_TO_PIXEL(events[i].y);
+                        point.x            = TOUCH_COORD_TO_PIXEL(events[i].x);
+                        point.y            = TOUCH_COORD_TO_PIXEL(events[i].y);
 
                         POINT cpoint = point;
                         ScreenToClient(m_handle, &cpoint);
@@ -1069,12 +1070,13 @@ void WindowImplWin32::processEvent(UINT message, WPARAM wParam, LPARAM lParam)
                             // Remove the stored ID
                             touchIDs[index] = static_cast<DWORD>(-1);
                         }
-                        if (events[i].dwFlags & TOUCHEVENTF_MOVE) {
+                        if (events[i].dwFlags & TOUCHEVENTF_MOVE)
+                        {
                             // Only handle real movement
                             if (touches[index].x != point.x || touches[index].y != point.y)
                             {
                                 touches[index] = point;
-                                event.type = Event::TouchMoved;
+                                event.type     = Event::TouchMoved;
                                 pushEvent(event);
                             }
                         }

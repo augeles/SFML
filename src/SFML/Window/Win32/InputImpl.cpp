@@ -254,12 +254,12 @@ Vector2i InputImpl::getTouchPosition(unsigned int finger)
 Vector2i InputImpl::getTouchPosition(unsigned int finger, const WindowBase& relativeTo)
 {
     const WindowHandle handle = relativeTo.getSystemHandle();
-    Vector2i pos;
+    Vector2i           pos;
 
     if (handle && WindowImplWin32::isTouchDown(finger))
     {
-        pos = WindowImplWin32::getTouchPosition(finger);
-        POINT point = { pos.x, pos.y };
+        pos         = WindowImplWin32::getTouchPosition(finger);
+        POINT point = {pos.x, pos.y};
         ScreenToClient(handle, &point);
         pos.x = point.x;
         pos.y = point.y;
