@@ -60,55 +60,9 @@ unsigned int               windowCount      = 0; // Windows owned by SFML
 unsigned int               handleCount      = 0; // All window handles
 const wchar_t*             className        = L"SFML_Window";
 sf::priv::WindowImplWin32* fullscreenWindow = nullptr;
-HINSTANCE                  user32Dll        = nullptr;
 DWORD                      touchIDs[10];
 POINT                      touches[10];
 
-#if WINVER < 0x0601
-// Define touch API that's available for more recent versions of Windows
-#define WM_TOUCH 0x0240
-    
-DECLARE_HANDLE(HTOUCHINPUT);
-
-typedef struct tagTOUCHINPUT
-{
-    LONG x;
-    LONG y;
-    HANDLE hSource;
-    DWORD dwID;
-    DWORD dwFlags;
-    DWORD dwMask;
-    DWORD dwTime;
-    ULONG_PTR dwExtraInfo;
-    DWORD cxContact;
-    DWORD cyContact;
-} TOUCHINPUT, *PTOUCHINPUT;
-
-typedef TOUCHINPUT const * PCTOUCHINPUT;
-
-#define TOUCH_COORD_TO_PIXEL(l) ((l) / 100)
-    
-#define TOUCHEVENTF_MOVE            0x0001
-#define TOUCHEVENTF_DOWN            0x0002
-#define TOUCHEVENTF_UP              0x0004
-#define TOUCHEVENTF_INRANGE         0x0008
-#define TOUCHEVENTF_PRIMARY         0x0010
-#define TOUCHEVENTF_NOCOALESCE      0x0020
-#define TOUCHEVENTF_PEN             0x0040
-#define TOUCHEVENTF_PALM            0x0080
-    
-typedef BOOL(WINAPI* RegisterTouchWindowFuncType)(HWND, ULONG);
-typedef BOOL(WINAPI* CloseTouchInputHandleFuncType)(HTOUCHINPUT);
-typedef BOOL(WINAPI* GetTouchInputInfoFuncType)(HTOUCHINPUT, UINT, PTOUCHINPUT, int);
-
-RegisterTouchWindowFuncType   RegisterTouchWindow   = nullptr;
-CloseTouchInputHandleFuncType CloseTouchInputHandle = nullptr;
-GetTouchInputInfoFuncType     GetTouchInputInfo     = nullptr;
-bool                          touchEnabled          = false;
-#else
-static const bool             touchEnabled          = true;
-#endif
-    
 // Convert a hardware dependent ID to a 0 based index we can use
 int getTouchID(DWORD id)
 {
@@ -132,7 +86,7 @@ int getTouchID(DWORD id)
 std::string getErrorString(DWORD error)
 {
     PTCHAR buffer;
-    
+
     if (FormatMessage(FORMAT_MESSAGE_MAX_WIDTH_MASK | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
                       nullptr,
                       error,
@@ -141,7 +95,7 @@ std::string getErrorString(DWORD error)
                       0,
                       nullptr) == 0)
         return "Unknown error.";
-    
+
     sf::String message = buffer;
     LocalFree(buffer);
     return message.toAnsiString();
@@ -151,52 +105,17 @@ const GUID GUID_DEVINTERFACE_HID = {0x4d1e55b2, 0xf16f, 0x11cf, {0x88, 0xcb, 0x0
 
 void setProcessDpiAware()
 {
-    // Try SetProcessDpiAwareness first
-    HINSTANCE shCoreDll = LoadLibrary(L"Shcore.dll");
-
-    if (shCoreDll)
+#if 0
+    // Windows 8.1+
+    if (SetProcessDpiAwareness(PROCESS_SYSTEM_DPI_AWARE) == E_INVALIDARG)
     {
-        enum ProcessDpiAwareness
-        {
-            ProcessDpiUnaware         = 0,
-            ProcessSystemDpiAware     = 1,
-            ProcessPerMonitorDpiAware = 2
-        };
-
-        using SetProcessDpiAwarenessFuncType = HRESULT(WINAPI*)(ProcessDpiAwareness);
-        auto SetProcessDpiAwarenessFunc      = reinterpret_cast<SetProcessDpiAwarenessFuncType>(
-            reinterpret_cast<void*>(GetProcAddress(shCoreDll, "SetProcessDpiAwareness")));
-
-        if (SetProcessDpiAwarenessFunc)
-        {
-            // We only check for E_INVALIDARG because we would get
-            // E_ACCESSDENIED if the DPI was already set previously
-            // and S_OK means the call was successful
-            if (SetProcessDpiAwarenessFunc(ProcessSystemDpiAware) == E_INVALIDARG)
-            {
-                sf::err() << "Failed to set process DPI awareness" << std::endl;
-            }
-            else
-            {
-                FreeLibrary(shCoreDll);
-                return;
-            }
-        }
-
-        FreeLibrary(shCoreDll);
+        sf::err() << "Failed to set process DPI awareness" << std::endl;
     }
+#endif
 
-    if (user32Dll)
+    if (!SetProcessDPIAware())
     {
-        using SetProcessDPIAwareFuncType = BOOL(WINAPI*)();
-        auto SetProcessDPIAwareFunc      = reinterpret_cast<SetProcessDPIAwareFuncType>(
-            reinterpret_cast<void*>(GetProcAddress(user32Dll, "SetProcessDPIAware")));
-
-        if (SetProcessDPIAwareFunc)
-        {
-            if (!SetProcessDPIAwareFunc())
-                sf::err() << "Failed to set process DPI awareness" << std::endl;
-        }
+        sf::err() << "Failed to set process DPI awareness" << std::endl;
     }
 }
 } // namespace
@@ -221,21 +140,15 @@ m_fullscreen(false),
 m_cursorGrabbed(false)
 {
     // If we're the first window handle
-    if (handleCount == 0)
-    {
-        // Ensure User32.dll is loaded
-        if (!user32Dll)
-            user32Dll = LoadLibraryA("User32.dll");
-
-        // Set that this process is DPI aware and can handle DPI scaling
-        setProcessDpiAware();
-    }
 
     if (m_handle)
     {
-        // If we're the first window handle, we only need to poll for joysticks when WM_DEVICECHANGE message is received
-        if (handleCount == 0)
+        // If we're the first window handle, set DPI Awareness
+        // plus we only need to poll for joysticks when WM_DEVICECHANGE message is received
+        if (handleCount == 0) {
+            setProcessDpiAware();
             JoystickImpl::setLazyUpdates(true);
+        }
 
         ++handleCount;
 
@@ -265,15 +178,9 @@ m_fullscreen((style & Style::Fullscreen) != 0),
 m_cursorGrabbed(m_fullscreen)
 {
     // If we're the first window handle
+    // Set that this process is DPI aware and can handle DPI scaling
     if (handleCount == 0)
-    {
-        // Ensure User32.dll is loaded
-        if (!user32Dll)
-            user32Dll = LoadLibraryA("User32.dll");
-
-        // Set that this process is DPI aware and can handle DPI scaling
         setProcessDpiAware();
-    }
 
     // Register the window class at first call
     if (windowCount == 0)
@@ -370,17 +277,9 @@ WindowImplWin32::~WindowImplWin32()
         --handleCount;
 
         // This was the last handle
+        // Reenable automatic joystick polling
         if (handleCount == 0)
-        {
-            // Free User32.dll
-            if (user32Dll)
-            {
-                FreeLibrary(user32Dll);
-                user32Dll = nullptr;
-            }
-            // Reenable automatic joystick polling
             JoystickImpl::setLazyUpdates(false);
-        }
     }
 
     if (!m_callback)
@@ -1127,38 +1026,38 @@ void WindowImplWin32::processEvent(UINT message, WPARAM wParam, LPARAM lParam)
         {
             // Get the number of events
             std::int16_t num = LOWORD(wParam);
-            
+
             // Reserve memory
-            PTOUCHINPUT events = new TOUCHINPUT[num];
-            
+            std::unique_ptr<TOUCHINPUT[]> events = std::make_unique<TOUCHINPUT[]>(num);
+
             if (events)
             {
-                if (GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam), num, events, sizeof(TOUCHINPUT)))
+                if (GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam), num, events.get(), sizeof(TOUCHINPUT)))
                 {
                     POINT point;
                     for (int i = 0; i < num; ++i)
                     {
                         Event event;
                         int index = getTouchID(events[i].dwID);
-                        
+
                         // Out of Ids? Should never happen
                         if (index == -1)
                             continue;
-                        
+
                         event.touch.finger = static_cast<unsigned int>(index);
                         point.x = TOUCH_COORD_TO_PIXEL(events[i].x);
                         point.y = TOUCH_COORD_TO_PIXEL(events[i].y);
-                        
+
                         POINT cpoint = point;
                         ScreenToClient(m_handle, &cpoint);
                         event.touch.x = cpoint.x;
                         event.touch.y = cpoint.y;
-                        
+
                         if (events[i].dwFlags & TOUCHEVENTF_DOWN)
                         {
                             event.type = Event::TouchBegan;
                             pushEvent(event);
-                            
+
                             // Prevent initial move event
                             touches[index] = point;
                         }
@@ -1186,7 +1085,6 @@ void WindowImplWin32::processEvent(UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     err() << "Failed to get touch input info: " << getErrorString(GetLastError()) << std::endl;
                 }
-                delete[] events;
             }
             break;
         }
@@ -1361,25 +1259,12 @@ void WindowImplWin32::prepareTouch()
     {
         prepared = true;
 
-#if WINVER < 0x0601
-        RegisterTouchWindow = reinterpret_cast<RegisterTouchWindowFuncType>(GetProcAddress(user32Dll, "RegisterTouchWindow"));
-
-        touchEnabled = RegisterTouchWindow != nullptr;
-
-        // If we've got touch support, load the other procs
-        if (touchEnabled)
-        {
-            CloseTouchInputHandle = reinterpret_cast<CloseTouchInputHandleFuncType>(GetProcAddress(user32Dll, "CloseTouchInputHandle"));
-            GetTouchInputInfo = reinterpret_cast<GetTouchInputInfoFuncType>(GetProcAddress(user32Dll, "GetTouchInputInfo"));
-
-            // Reset touch IDs
-            for (int i = 0; i < 10; ++i)
-                touchIDs[i] = static_cast<DWORD>(-1);
-        }
-#endif
+        // Reset touch IDs
+        for (int i = 0; i < 10; ++i)
+            touchIDs[i] = static_cast<DWORD>(-1);
     }
 
-    if (touchEnabled && m_handle)
+    if (m_handle)
         RegisterTouchWindow(m_handle, 0);
 }
 
